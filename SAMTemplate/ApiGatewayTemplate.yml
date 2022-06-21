@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Globals:
+  Function:
+    Runtime: java11
+    Timeout: 120
+    MemorySize: 1024
+    CodeUri: ../target/ApiGatewayCache-1.0.0.jar
+    Environment:
+      Variables:
+        region: "us-east-2"  # Modify the region as per your convenience. The region should match the region in which the resources are getting deployed.
+Resources:
+
+
+  FlushCacheTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: "FlushCacheTopic"
+
+# This function will flush the cache . Thsi function subscribes to the FlushCacheTopic .
+# This is useful when the underlying backend data is modified and the application wants the cache to be updated with the latest state.
+  FlushCacheFunction:
+    Type: 'AWS::Serverless::Function'
+    DependsOn: FlushCacheTopic
+    Properties:
+      FunctionName: FlushCacheFunction
+      Handler: com.aws.poc.lambda.apigatewaycache.FlushCacheFunctionHandler
+      Tracing: Active
+
+      Events:
+        SnsEvent:
+          Type: SNS
+          Properties:
+            Topic: !Ref FlushCacheTopic
+
+
+      Policies:
+        - LambdaInvokePolicy :
+            FunctionName: FlushCacheFunction
+
+        - Statement:
+          - Sid: ApiGatewayAccess
+            Effect: Allow
+            Action:
+            - apigateway:*
+            Resource: !Sub
+              - 'arn:aws:apigateway:${AWS::Region}::/restapis/${restApiId}/*'
+              - restApiId: "kn5c0mjkt2"
+
+
+
+
+#This function is triggered based on the EventBridge rules and the payload that is sent by the EventBridge rule .
+# This function will enable or disable the API Gateway cache .
+  EnableDisableCache:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: EnableDisableCache
+      Handler: com.aws.poc.lambda.apigatewaycache.ApiGatewayCacheFunctionHandler
+      Tracing: Active
+      Events:
+        CreateCache:
+          Type: Schedule
+          Properties:
+            Name: CreateCache
+            Input:  !Sub
+                  - |
+                    {
+                      "enable" :  "true",
+                      "restApiId": "${restApiId}",
+                      "stageName": "${stageName}"
+                    }
+                  - restApiId: "kn5c0mjkt2"  # Modify the value of the restapi id based on the actual api id
+                    stageName: "petstore"   # Modify the value of the stage name based on what you have set.
+            Schedule: cron(30 4 ? * * *)  # Set the cron schedule for enabling the cache
+        DeleteCache:
+          Type: Schedule
+          Properties:
+            Name: DeleteCache
+            Input:  !Sub
+                  - |
+                    {
+                      "enable" :  "false",
+                      "restApiId": "${restApiId}",
+                      "stageName": "${stageName}"
+                    }
+                  - restApiId: "kn5c0mjkt2" # Modify the value of the restapi id based on the actual api id
+                    stageName: "petstore"   # Modify the value of the stage name based on what you have set.
+
+            Schedule: cron(30 18 ? * * *)   # Set the cron schedule for disabling the cache.
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: EnableDisableCache
+        - VPCAccessPolicy: { }
+
+        - Statement:
+            - Sid: ApiGatewayAccess
+              Effect: Allow
+              Action:
+                - apigateway:*
+         #     Resource: 'arn:aws:apigateway:*::/*'
+              Resource : !Sub
+                - 'arn:aws:apigateway:${AWS::Region}::/restapis/${restApiId}/*'
+                - restApiId : "kn5c0mjkt2"
+
+
+
+
+      
+ 
+  
